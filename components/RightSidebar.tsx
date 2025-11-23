@@ -1,150 +1,311 @@
 'use client';
 
-import { useState } from 'react';
-import { Message } from '@/types/chat';
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  lastUpdated: Date;
-}
+import { useState, useEffect } from 'react';
+import { MoreIcon } from '@/components/icons';
+import { useConversations } from '@/hooks/useConversations';
+import { formatRelativeDate } from '@/utils/date';
+import { updateConversationTitle } from '@/services/api';
 
 interface RightSidebarProps {
-  currentMessages: Message[];
-  onLoadConversation: (conversation: Conversation) => void;
+  userEmail: string;
+  agentId: string;
+  onLoadConversation: (conversationId: number) => void;
+  onNewConversation: () => void;
 }
 
-export default function RightSidebar({ currentMessages, onLoadConversation }: RightSidebarProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<string>('');
+export default function RightSidebar({ userEmail, agentId, onLoadConversation, onNewConversation }: RightSidebarProps) {
+  const { conversations, isLoading, removeConversation, loadConversations } = useConversations(userEmail, agentId);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState<string>('');
 
-  const saveCurrentConversation = () => {
-    if (currentMessages.length === 0) return;
-
-    const newConversation: Conversation = {
-      id: Date.now().toString(),
-      title: currentMessages[0]?.content.slice(0, 30) || '새 대화',
-      messages: [...currentMessages],
-      lastUpdated: new Date(),
+  // 메뉴 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (openMenuId !== null) {
+        setOpenMenuId(null);
+      }
     };
 
-    setConversations((prev) => [newConversation, ...prev]);
-  };
+    if (openMenuId !== null) {
+      document.addEventListener('click', handleClickOutside);
+      return () => {
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  }, [openMenuId]);
 
-  const handleLoadConversation = (conversation: Conversation) => {
-    setSelectedConversationId(conversation.id);
-    onLoadConversation(conversation);
-  };
+  const handleDeleteConversation = async (conversationId: number) => {
+    if (!confirm('이 대화를 삭제하시겠습니까?')) {
+      return;
+    }
 
-  const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConversations((prev) => prev.filter((conv) => conv.id !== id));
-    if (selectedConversationId === id) {
-      setSelectedConversationId('');
+    try {
+      await removeConversation(conversationId);
+      setOpenMenuId(null);
+    } catch (error) {
+      alert('대화 삭제에 실패했습니다.');
     }
   };
 
+  const handleStartEdit = (conversationId: number, currentTitle: string) => {
+    setEditingId(conversationId);
+    setEditTitle(currentTitle);
+    setOpenMenuId(null);
+  };
+
+  const handleSaveEdit = async (conversationId: number) => {
+    if (!editTitle.trim()) {
+      alert('대화 제목을 입력해주세요.');
+      return;
+    }
+
+    try {
+      await updateConversationTitle(conversationId, editTitle);
+      await loadConversations();
+      setEditingId(null);
+      setEditTitle('');
+    } catch (error) {
+      alert('대화 제목 수정에 실패했습니다.');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditTitle('');
+  };
+
+  const toggleMenu = (conversationId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenMenuId(openMenuId === conversationId ? null : conversationId);
+  };
+
   return (
-    <div className="w-64 flex flex-col py-6" style={{ backgroundColor: 'var(--color-background)', borderLeft: '1px solid var(--color-border)' }}>
-      {/* 헤더 */}
-      <div className="px-4 pb-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <h2 className="text-lg font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>대화 이력</h2>
+    <div style={{
+      width: 'var(--sidebar-width)',
+      height: '100%',
+      backgroundColor: 'var(--color-background)',
+      borderLeft: '1px solid var(--color-border)',
+      padding: '24px 16px',
+      position: 'relative',
+      overflowY: 'auto'
+    }}>
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--color-text-primary)', margin: 0 }}>
+            대화 이력
+          </h3>
+        </div>
         <button
-          onClick={saveCurrentConversation}
-          disabled={currentMessages.length === 0}
-          className="w-full px-4 py-2 text-sm rounded font-semibold transition-all duration-200 shadow-sm"
+          onClick={onNewConversation}
           style={{
-            backgroundColor: currentMessages.length === 0 ? 'var(--color-border)' : 'var(--color-kb-yellow)',
-            color: currentMessages.length === 0 ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
+            width: '100%',
+            padding: '10px 16px',
+            fontSize: '12px',
+            fontWeight: '500',
+            backgroundColor: 'var(--color-text-primary)',
+            color: 'var(--color-white)',
             border: 'none',
-            cursor: currentMessages.length === 0 ? 'not-allowed' : 'pointer'
+            borderRadius: 'var(--border-radius-md)',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
           }}
           onMouseEnter={(e) => {
-            if (!e.currentTarget.disabled) {
-              e.currentTarget.style.backgroundColor = '#F5A623';
-            }
+            e.currentTarget.style.opacity = '0.85';
           }}
           onMouseLeave={(e) => {
-            if (!e.currentTarget.disabled) {
-              e.currentTarget.style.backgroundColor = 'var(--color-kb-yellow)';
-            }
+            e.currentTarget.style.opacity = '1';
           }}
         >
-          현재 대화 저장
+          + 새 대화
         </button>
       </div>
 
-      {/* 대화 목록 */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {conversations.length === 0 ? (
-          <div className="text-center text-sm mt-8" style={{ color: 'var(--color-text-secondary)' }}>
-            <div className="text-4xl mb-2">📝</div>
-            <p>저장된 대화가 없습니다</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                onClick={() => handleLoadConversation(conversation)}
-                className="p-3 rounded-lg cursor-pointer transition-all duration-200"
-                style={{
-                  backgroundColor: selectedConversationId === conversation.id ? '#FFE05A' : 'var(--color-white)',
-                  border: selectedConversationId === conversation.id ? '2px solid var(--color-kb-yellow)' : '1px solid var(--color-border)',
-                  boxShadow: selectedConversationId === conversation.id ? '0 2px 4px rgba(0, 0, 0, 0.1)' : 'none'
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedConversationId !== conversation.id) {
-                    e.currentTarget.style.backgroundColor = '#F5F5F5';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedConversationId !== conversation.id) {
-                    e.currentTarget.style.backgroundColor = 'var(--color-white)';
-                  }
-                }}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="text-sm font-medium truncate flex-1" style={{ color: 'var(--color-text-primary)' }}>
-                    {conversation.title}
-                  </h3>
-                  <button
-                    onClick={(e) => handleDeleteConversation(conversation.id, e)}
-                    className="ml-2 text-lg leading-none transition-colors"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                    title="삭제"
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = '#D0021B';
+      {isLoading ? (
+        <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+          로딩 중...
+        </p>
+      ) : conversations.length === 0 ? (
+        <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+          아직 대화 이력이 없습니다.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {conversations.map((conversation) => (
+            <div
+              key={conversation.id}
+              style={{
+                backgroundColor: 'var(--color-white)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--border-radius-md)',
+                padding: '12px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                position: 'relative'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-hover-bg)';
+                e.currentTarget.style.borderColor = 'var(--color-border-hover)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-white)';
+                e.currentTarget.style.borderColor = 'var(--color-border)';
+              }}
+            >
+              {editingId === conversation.id ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSaveEdit(conversation.id);
+                      } else if (e.key === 'Escape') {
+                        handleCancelEdit();
+                      }
                     }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = 'var(--color-text-secondary)';
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      fontSize: '12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--border-radius-md)',
+                      outline: 'none'
                     }}
-                  >
-                    ×
-                  </button>
+                  />
+                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={handleCancelEdit}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        backgroundColor: 'transparent',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--border-radius-md)',
+                        cursor: 'pointer',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={() => handleSaveEdit(conversation.id)}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        backgroundColor: 'var(--color-text-primary)',
+                        border: 'none',
+                        borderRadius: 'var(--border-radius-md)',
+                        cursor: 'pointer',
+                        color: 'var(--color-white)'
+                      }}
+                    >
+                      저장
+                    </button>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                    💬 {conversation.messages.length}개
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {conversation.lastUpdated.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-                  </p>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => onLoadConversation(conversation.id)}>
+                    <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--color-text-primary)', marginBottom: '4px' }}>
+                      {conversation.title}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                      {formatRelativeDate(conversation.updated_at)}
+                    </div>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={(e) => toggleMenu(conversation.id, e)}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}
+                      title="더보기"
+                    >
+                      <MoreIcon />
+                    </button>
+                    {openMenuId === conversation.id && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          right: 0,
+                          top: '100%',
+                          marginTop: '4px',
+                          backgroundColor: 'var(--color-white)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 'var(--border-radius-md)',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                          zIndex: 10,
+                          minWidth: '140px'
+                        }}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEdit(conversation.id, conversation.title);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px 16px',
+                            fontSize: '12px',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            color: 'var(--color-text-primary)',
+                            borderBottom: '1px solid var(--color-border)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--color-hover-bg)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          이름 변경하기
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteConversation(conversation.id);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px 16px',
+                            fontSize: '12px',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            color: '#c33'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--color-hover-bg)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          삭제하기
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 하단 안내 */}
-      <div className="px-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <div className="flex items-center justify-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          <span>💾</span>
-          <span>대화를 저장하고 불러올 수 있습니다</span>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }

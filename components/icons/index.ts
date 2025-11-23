@@ -5,3 +5,6 @@ export { SendIcon } from './SendIcon';
 export { LinkIcon } from './LinkIcon';
 export { ExternalLinkIcon } from './ExternalLinkIcon';
 export { CloseIcon } from './CloseIcon';
+export { LogoutIcon } from './LogoutIcon';
+export { TrashIcon } from './TrashIcon';
+export { MoreIcon } from './MoreIcon';

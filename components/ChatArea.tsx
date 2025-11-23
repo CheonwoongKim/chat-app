@@ -4,18 +4,19 @@ import { useState, useRef, useEffect } from 'react';
 import { Message } from '@/types/chat';
 import { getAgent } from '@/config/agents';
 import { KBLogo } from '@/components/KBLogo';
-import { MenuIcon, SendIcon, LinkIcon, ExternalLinkIcon } from '@/components/icons';
+import { SendIcon, LinkIcon, ExternalLinkIcon } from '@/components/icons';
 import { LOADING_MESSAGES, TIMING } from '@/constants';
+import { saveMessage } from '@/services/api';
 
 interface ChatAreaProps {
   selectedAgent: string;
   messages: Message[];
   onNewMessage: (message: Message) => void;
-  isHistoryOpen: boolean;
-  onToggleHistory: () => void;
+  conversationId: number | null;
+  ensureConversationExists?: () => Promise<number | null>;
 }
 
-export default function ChatArea({ selectedAgent, messages, onNewMessage, isHistoryOpen, onToggleHistory }: ChatAreaProps) {
+export default function ChatArea({ selectedAgent, messages, onNewMessage, conversationId, ensureConversationExists }: ChatAreaProps) {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
@@ -41,6 +42,24 @@ export default function ChatArea({ selectedAgent, messages, onNewMessage, isHist
     }
   }, [isLoading]);
 
+  const saveMessageToDB = async (role: 'user' | 'assistant', content: string, sources?: any[]) => {
+    let convId = conversationId;
+
+    // 대화 세션이 없으면 생성
+    if (!convId && ensureConversationExists) {
+      convId = await ensureConversationExists();
+      if (!convId) return;
+    }
+
+    if (!convId) return;
+
+    try {
+      await saveMessage(convId, role, content, sources);
+    } catch (error) {
+      console.error('메시지 저장 오류:', error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
@@ -56,6 +75,9 @@ export default function ChatArea({ selectedAgent, messages, onNewMessage, isHist
     const userInput = inputValue;
     setInputValue('');
     setIsLoading(true);
+
+    // 사용자 메시지 DB에 저장
+    await saveMessageToDB('user', userInput);
 
     try {
       // API 호출
@@ -105,6 +127,9 @@ export default function ChatArea({ selectedAgent, messages, onNewMessage, isHist
       };
 
       onNewMessage(assistantMessage);
+
+      // 어시스턴트 메시지 DB에 저장
+      await saveMessageToDB('assistant', content, data.sources);
     } catch (error) {
       console.error('API 호출 오류:', error);
       const errorMessage: Message = {
@@ -114,6 +139,9 @@ export default function ChatArea({ selectedAgent, messages, onNewMessage, isHist
         timestamp: new Date(),
       };
       onNewMessage(errorMessage);
+
+      // 에러 메시지도 DB에 저장
+      await saveMessageToDB('assistant', errorMessage.content);
     } finally {
       setIsLoading(false);
     }
@@ -121,28 +149,6 @@ export default function ChatArea({ selectedAgent, messages, onNewMessage, isHist
 
   return (
     <div className="flex-1 flex flex-col items-center" style={{ backgroundColor: 'var(--color-background)' }}>
-      {/* 타이틀 바 */}
-      <div className="w-full flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)', height: 'var(--title-bar-height)', backgroundColor: 'var(--color-background)', paddingLeft: '32px', paddingRight: '32px' }}>
-        <h1 style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--color-text-primary)', margin: 0 }}>{agent.name}</h1>
-        {!isHistoryOpen && (
-          <button
-            onClick={onToggleHistory}
-            style={{
-              backgroundColor: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-            title="대화 이력"
-          >
-            <MenuIcon isOpen={isHistoryOpen} />
-          </button>
-        )}
-      </div>
-
       {/* 채팅 메시지 영역 */}
       <div className="flex-1 overflow-y-auto space-y-4" style={{ backgroundColor: 'var(--color-background)', maxWidth: 'var(--chat-max-width)', width: '100%', paddingTop: '24px' }}>
         {messages.length === 0 ? (
